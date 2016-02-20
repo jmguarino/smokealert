@@ -1,0 +1,1 @@
+These scripts take place of the usual email alerts that Smokeping sends out. See the comments on the individual scripts for more info. Note: These scripts were written for a particular imeplementation of a master/slave smokeping cluster, so you will likely need to edit a few things to get them working on your specific implementation.
