@@ -146,7 +146,7 @@ sub _sendAlert()
 				$body .= $line;
 				_eval_from($host, $line);
 			}
-			elsif($line =~ //){
+			elsif($line =~ /'***IPV4PROBENAMEHERE***/){
 				$body .= "IPv4 ping failed to $host\n";
 				$body .= $line;
 				_eval_from($host, $line);
