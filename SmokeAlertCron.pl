@@ -4,7 +4,7 @@
 #
 # NOTE! This script was intended for a specific implementation where the names of each target
 # had a logical scheme to their naming which this fits. You will likely need to modify the regexes
-# where the body is parsed to suite your needs
+# where the body is parsed to match a common theme in your target names. 
 # 
 # This script is meant to be paired with SmokeAlertListener.pl and it takes over the responsibility
 # of sending out notifications of packet loss. The default smokeping alerting allows for state 
@@ -22,6 +22,11 @@ use Email::Send;
 use Email::Simple;
 use File::stat;
 use Storable;
+
+#These variables should be defined in order for emails and subjects to be meaningful.
+my $HOSTNAME = "HOSTNAME HERE";
+my $INSTALLDIR = "INSTALLDIR HERE"
+my $EMAIL = "EMAIL SCRIPT IS SENT FROM HERE"
 
 # This hash can be adjusted if we want to fine tune how noisy the alerts are. Each key corresponds to
 # packet loss detected in a 5 minute period (20 pings every 5 minutes from smokeping) and the value maps 
@@ -64,7 +69,7 @@ foreach my $hostFile(@files){
 
 		#check if file hasn't been modified for 30min indicating no packet loss reported, if so clear alert
 		if($currentTime-$lastModified >= 1800){
-			_clearAlert($host);
+			&_clearAlert($host);
 		}
 		elsif(!exists($alertingHosts{$host})){
 			#Host not previously reported, evaluate if it should be added to alerting hosts based on 
@@ -109,7 +114,7 @@ if($currentTime-$lastAlertTime >= 3600 && (scalar keys %alertingHosts) > 0) {
 }
 
 if($shouldSend == 1){
-	_sendAlert();
+	&_sendAlert();
 	$lastAlertTime = $currentTime;
 }
 
@@ -117,44 +122,44 @@ if($shouldSend == 1){
 store \%alertingHosts, $alertHostFile;
 store \$lastAlertTime, $lastAlertTimeFile;
 
-sub _clearAlert($){
+sub _clearAlert
+{
 	my $hostname = shift;
 
 	unlink "/dev/shm/smokeping/$hostname";
 	delete $alertingHosts{$hostname};
 }
 
-sub _sendAlert()
+sub _sendAlert
 {
 	my $body;
 	my $subject = "Smokeping has detected loss";
 
 	foreach my $alertHost(keys %alertingHosts){
-		my $host = $alertHost;
-		open(my $infh, "<", "/dev/shm/smokeping/$host") || die "Couldn't open /dev/shm/smokeping/$host for reading because: ".$!;
-		flock($infh, 1) || die "Couldn't lock file /dev/shm/smokeping/$host for reading \n";
+		open(my $infh, "<", "/dev/shm/smokeping/$alertHost") || die "Couldn't open /dev/shm/smokeping/$alertHost for reading because: ".$!;
+		flock($infh, 1) || die "Couldn't lock file /dev/shm/smokeping/$alertHost for reading \n";
 
 		while(!eof $infh){
 			my $line = readline $infh;
-			if($line =~ /'***HTTPSPROBENAMEHERE***'/){
-				$body .= "Lookup of ***DNSTargetHere*** failed using $host\n";
+			if($line =~ /DNS/){
+				$body .= "Dig failed using $alertHost\n";
 				$body .= $line;
-				_eval_from($host, $line);
+				_eval_from($alertHost, $line);
 			}
-			elsif($line =~ /'***HTTPSPROBENAMEHERE***'/){
-				$body .= "HTTPS connection to $host failed\n";
+			elsif($line =~ /https/){
+				$body .= "HTTPS connection to $alertHost failed\n";
 				$body .= $line;
-				_eval_from($host, $line);
+				_eval_from($alertHost, $line);
 			}
-			elsif($line =~ /'***IPV4PROBENAMEHERE***/){
-				$body .= "IPv4 ping failed to $host\n";
+			elsif($line =~ /IPv4/){
+				$body .= "IPv4 ping failed to $alertHost\n";
 				$body .= $line;
-				_eval_from($host, $line);
+				_eval_from($alertHost, $line);
 			}
-			elsif($line =~ /'IPV6PROBENAMEHERE'/){
-				$body .= "IPv6 ping failed to $host\n";
+			elsif($line =~ /IPv6/){
+				$body .= "IPv6 ping failed to $alertHost\n";
 				$body .= $line;
-				_eval_from($host, $line);
+				_eval_from($alertHost, $line);
 			}
 			else{
 				$body .= $line;
@@ -185,11 +190,11 @@ sub _sendAlert()
 
 	my $mail = Email::Simple->create(
 		header=> [
-		From => 'smokealert@INSERTDOMAINHERE',
-		To => 'INSERTTOADDRESSHERE', ###
+		From => 'smokealert@$HOSTNAME',
+		To => '$EMAIL', ###
 		Subject => $subject,
 		],
-		body=> $bodyTop . $body . "\n\nThis alert was sent using /***FullDirectoryHere***/SmokeAlertCron.pl on ***HostNameHere***\n",
+		body=> $bodyTop . $body . "\n\nThis alert was sent using $INSTALLDIR/SmokeAlertCron.pl on $HOSTNAME\n",
 		);
 
 	my $sender = Email::Send->new({ mailer => 'Email::Send::Sendmail' });
@@ -214,30 +219,32 @@ sub _eval_Problem_Hosts
 
 	while(%toFrom){
 		my $topCount = 0;
-		my @problemHosts;
-		foreach my $fromRef (keys %toFrom){
-			my $count = keys %{$toFrom{$fromRef}};
-			if($count > $topCount){
-				$topCount = $count;
-				@problemHosts=();
-				push @problemHosts, $fromRef;
-			}
-			elsif($count == $topCount){
-				push @problemHosts, $fromRef;
+		my $problemHost;
+		my %totalReports;
+		foreach my $toHost (keys %toFrom) {
+			foreach my $fromHost (keys %{$toFrom{$toHost}}) {
+				$totalReports{$toHost}++;
+				$totalReports{$fromHost}++;
 			}
 		}
 
-		foreach my $probHost (@problemHosts){
-			push @retProbHosts, $probHost;
-			delete $toFrom{$probHost};
+		my @sortedHosts;
 
-			foreach my $hostRef (keys %toFrom){
-				if(exists($toFrom{$hostRef}{$probHost})){
-					delete $toFrom{$hostRef}->{$probHost};
-				}
-				if(!keys %{$toFrom{$hostRef}}){
+		foreach my $probHost ( sort {$totalReports{$b} <=> $totalReports{$a}} keys %totalReports){
+			push @sortedHosts, $probHost;
+		}
+
+		$problemHost=$sortedHosts[0];
+
+		push @retProbHosts, $problemHost;
+		delete $toFrom{$problemHost};
+
+		foreach my $hostRef (keys %toFrom){
+			if(exists($toFrom{$hostRef}{$problemHost})){
+					delete $toFrom{$hostRef}->{$problemHost};
+			}
+			if(!keys %{$toFrom{$hostRef}}){
 					delete $toFrom{$hostRef};
-				}
 			}
 		}
 	}
